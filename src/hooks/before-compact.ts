@@ -313,6 +313,31 @@ export const registerBeforeCompactHook = (
   omRuntime: Runtime,
 ) => {
   pi.on("session_before_compact", (event, ctx) => {
+    // F2 fail-safe wrapper: Pi's emit() try/catches handler throws and then runs
+    // ITS fallback compactor — a blackhole throw would leak the __pi_vcc__
+    // sentinel into the model prompt. Fail closed instead.
+    const { reason, willRetry } = event ?? {};
+    try {
+      return handleBeforeCompact(event, ctx, omRuntime);
+    } catch (error) {
+      debugLog(
+        "before_compact.error",
+        {
+          error: error instanceof Error ? error.message : String(error),
+          reason,
+          willRetry,
+        },
+        omRuntime.config.debugLog === true,
+      );
+      // Overflow: fall through to Pi's own compactor so the session still
+      // recovers (returning cancel could loop the overflow retry).
+      // Everything else: fail closed — no paid run, no sentinel leak.
+      if (reason === "overflow") return undefined;
+      return { cancel: true };
+    }
+  });
+
+  function handleBeforeCompact(event: any, ctx: any, omRuntime: Runtime): any {
     const {
       preparation,
       branchEntries,
@@ -681,7 +706,7 @@ export const registerBeforeCompactHook = (
         firstKeptEntryId,
       },
     };
-  });
+  }
 
   // Fire success toast for /compact path only (delayed to let UI settle).
   // /blackhole path uses its own onComplete callback in the command handler.
