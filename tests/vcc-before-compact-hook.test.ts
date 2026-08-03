@@ -65,6 +65,7 @@ function createMockPi(initialConfig?: Record<string, unknown>) {
       ui.notify(msg, "info");
       return true;
     }),
+    consolidationInFlight: false,
     config,
   };
   return {
@@ -676,5 +677,45 @@ describe("registerBeforeCompactHook: overflow force-compact (Phase 1)", () => {
     ];
     const result = invoke(makeEvent(entries, undefined, "threshold", false));
     expect(result).toBeUndefined();
+  });
+});
+
+describe("registerBeforeCompactHook: consolidation race tag (F1)", () => {
+  beforeEach(() => {
+    if (existsSync(DEBUG_PATH)) unlinkSync(DEBUG_PATH);
+  });
+  afterEach(() => {
+    if (existsSync(CONFIG_PATH)) unlinkSync(CONFIG_PATH);
+    if (existsSync(DEBUG_PATH)) unlinkSync(DEBUG_PATH);
+  });
+
+  const fourEntries = () => [
+    msg("m1", "user"),
+    msg("m2", "assistant"),
+    msg("m3", "user"),
+    msg("m4", "assistant"),
+  ];
+
+  test("compaction while consolidationInFlight tags om.consolidationRacedCompaction", () => {
+    const { pi, invoke, omRuntime } = createMockPi();
+    omRuntime.config.overrideDefaultCompaction = false;
+    omRuntime.consolidationInFlight = true;
+    registerBeforeCompactHook(pi, omRuntime);
+
+    const result = invoke(makeEvent(fourEntries(), PI_VCC_COMPACT_INSTRUCTION));
+    expect(result.compaction.details["om.consolidationRacedCompaction"]).toBe(
+      true,
+    );
+  });
+
+  test("no race tag when consolidation is idle", () => {
+    const { pi, invoke, omRuntime } = createMockPi();
+    omRuntime.config.overrideDefaultCompaction = false;
+    registerBeforeCompactHook(pi, omRuntime);
+
+    const result = invoke(makeEvent(fourEntries(), PI_VCC_COMPACT_INSTRUCTION));
+    expect(
+      result.compaction.details["om.consolidationRacedCompaction"],
+    ).toBeUndefined();
   });
 });

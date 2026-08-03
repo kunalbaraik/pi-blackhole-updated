@@ -465,7 +465,7 @@ export function registerConsolidationTrigger(
 /** Validate cursors against the current branch.  If a cursor's entry ID no longer
  *  exists in the branch (fork, navigation, compaction), fall back to the best
  *  available coverage marker for that stage. */
-function validateCursors(entries: Entry[], runtime: Runtime): void {
+export function validateCursors(entries: Entry[], runtime: Runtime): void {
   const cursors = runtime.cursors ?? {};
 
   // Observer: fall back to latest OM_OBSERVATIONS_RECORDED marker
@@ -658,6 +658,21 @@ export async function runConsolidationPipeline(
         error,
       ),
     });
+  }
+
+  // F1: compaction can fire mid-pipeline (both triggers share turn_end). The
+  // branch may have been rewritten while stages ran — re-validate cursors
+  // against the CURRENT branch so advances never reference entries a
+  // compaction replaced, then flush the corrected cursors.
+  try {
+    const freshEntries = ctx.sessionManager.getBranch() as Entry[];
+    validateCursors(freshEntries, runtime);
+  } catch (error) {
+    if (isStaleExtensionContextError(error)) {
+      debugLog("pipeline.stale_ctx", { error: String(error) });
+      return;
+    }
+    throw error;
   }
 
   // Flush cursors to pending file after all stages complete (non‑blocking)

@@ -672,6 +672,15 @@ export const registerBeforeCompactHook = (
       previousSummaryUsed: Boolean(preparation.previousSummary),
     };
 
+    // F1: if a consolidation run was in flight when this compaction fired,
+    // tag the details so the raced window is never silently treated as
+    // observed (cursor revalidation happens at pipeline completion).
+    if (omRuntime.consolidationInFlight) {
+      (details as PiVccCompactionDetails & Record<string, unknown>)[
+        "om.consolidationRacedCompaction"
+      ] = true;
+    }
+
     omRuntime.compactWasPiVcc = isPiVcc;
 
     // ── Inject observational-memory content ───────────────────────────
