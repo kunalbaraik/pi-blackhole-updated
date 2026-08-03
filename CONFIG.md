@@ -65,8 +65,10 @@ Controls when compaction triggers. Replaces the old `noAutoCompact` and partiall
 | Value | Auto-trigger | `/compact` (Pi built-in) | `/blackhole` |
 |-------|:---:|:---:|:---:|
 | `"auto"` | blackhole fires at `compactAfterTokens` threshold ✓ | blackhole handles | blackhole handles |
-| `"manual"` | skipped | Pi handles ✓ | blackhole handles |
+| `"manual"` | cancelled (no paid run) | cancelled (v0.5) | blackhole handles |
 | `"off"` | skipped (Pi handles) | Pi handles ✓ | blackhole handles |
+
+> **Overflow exception (v0.5):** when the compaction reason is context **overflow** (session would fail otherwise), blackhole always compacts deterministically — regardless of `compaction: "manual"`/`"off"`. Overflow recovery must never fail open.
 
 **Examples:**
 
@@ -74,7 +76,7 @@ Controls when compaction triggers. Replaces the old `noAutoCompact` and partiall
 // Auto-compact (default)
 { "compaction": "auto" }
 
-// Manual only — /compact falls through to Pi, /blackhole uses blackhole pipeline
+// Manual only — ALL non-/blackhole compactions cancelled (incl. /compact); /blackhole only
 { "compaction": "manual" }
 
 // Blackhole skips auto + /compact (Pi handles both), /blackhole still works
@@ -98,8 +100,10 @@ Replaces the old `overrideDefaultCompaction`.
 |:---:|:---:|---|---|---|
 | auto | blackhole | blackhole fires at `compactAfterTokens` ✓ | blackhole handles | blackhole handles |
 | auto | pi-default | trigger skips (Pi decides when) | Pi handles | blackhole handles |
-| manual | (any) | skipped | Pi handles ✓ | blackhole handles |
+| manual | (any) | cancelled (no paid run) | cancelled (v0.5) | blackhole handles |
 | off | (any) | skipped | Pi handles ✓ | blackhole handles |
+
+> **Overflow exception (v0.5):** reason `overflow` bypasses the manual/off guards — blackhole compacts deterministically so the session always recovers.
 
 ### `tailBehavior`
 
@@ -233,6 +237,8 @@ Hard ceiling for the active observation pool. The dropper prunes when this ceili
 | Type | Default |
 |------|---------|
 | number | 20000 |
+
+> **Token accounting (F4):** pool token estimates use `chars/4` and gate **OM-internal accounting only**. The main compaction trigger (`compactAfterTokens`) uses Pi's real token estimator on message entries — the two are independent.
 
 ### `observationsPoolTargetTokens`
 

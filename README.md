@@ -15,6 +15,8 @@ Blackhole merges the best ideas from [pi-vcc](https://github.com/sting8k/pi-vcc)
 🔄 See [`MIGRATION-GUIDE.md`](MIGRATION-GUIDE.md) if upgrading from an older version.
 📜 See [`OLD_CONFIG.md`](OLD_CONFIG.md) for the legacy config documentation.
 
+> **Supported Pi runtime:** `>=0.81.1 <1.0.0`. blackhole hand-replicates Pi-internal cut logic and reads private registry fields; outside this range blackhole warns once at startup and behavior may differ.
+
 ---
 
 ## Quick start
@@ -194,6 +196,8 @@ Two modes, one shared goal: keep your agent's context sharp without manual house
 
 The tradeoff is simplicity vs cleanliness:
 
+> **Manual mode is strict (v0.5):** with `compaction: "manual"`, blackhole cancels *all* non-`/blackhole` compactions — Pi's paid auto-compaction **and** the native `/compact` command. `/blackhole` is the single escape hatch. The one exception is context **overflow** recovery, which still compacts deterministically (free) so the session never gets stuck.
+
 | | Auto (default) | Manual (`compaction: "manual"`) |
 |---|---|---|
 | Workers run? | Yes | Yes |
@@ -215,6 +219,8 @@ The difference from Pi's built-in `/compact`:
 ### Fully disabled
 
 Set `compaction: "off"` and `memory: false` (or the environment variable `PI_BLACKHOLE_PASSIVE=true` which sets both) to completely disable all background workers and blackhole's auto-compaction trigger. Pi handles auto-compaction normally. Explicit `/blackhole` still uses blackhole's pipeline. This is useful for debugging or if you want manual-only blackhole involvement.
+
+> **Overflow exception (v0.5):** even with `compaction: "off"`, context **overflow** recovery still triggers blackhole's deterministic compaction — overflow must never fail open. Only threshold/manual reasons honor "off".
 
 ### Without observational memory (vcc-only)
 
@@ -408,6 +414,8 @@ For each stage, the runtime builds a candidate list from:
 2. **Stage fallback models** (`observerFallbackModels`, etc.) — tried in order
 3. **Base model** (`model` — shared across all workers)
 4. **Session model** (the model used for your main conversation — always the last resort)
+
+> **💰 Cost guardrail (v0.5):** with no stage models configured and no base `model`, every OM worker runs on your **session model** — typically the most expensive one in play. blackhole shows a one-time startup notice in this configuration. Point workers at cheaper models (see the presets below) to keep the memory layer near-free. The compaction itself is always deterministic and costs nothing.
 
 Models with active cooldowns are transparently skipped. The runtime tries up to 10 model resolutions per stage before giving up entirely.
 

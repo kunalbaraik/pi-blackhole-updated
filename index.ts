@@ -17,6 +17,10 @@ import { registerCompactionTrigger } from "./src/om/compaction-trigger.js";
 import { registerRecallTool } from "./src/tools/recall";
 import { Runtime } from "./src/om/runtime.js";
 import { captureRegisteredProviderStreams } from "./src/om/provider-stream.js";
+import {
+  getPiRuntimeVersion,
+  isVersionInRange,
+} from "./src/pi-base/version-guard.js";
 
 export default (pi: ExtensionAPI) => {
   // ── Bridge: capture custom provider stream functions for jiti-loaded agents ──
@@ -40,6 +44,45 @@ export default (pi: ExtensionAPI) => {
   scaffoldSettings();
 
   const omRuntime = new Runtime();
+
+  // ── Version guard (S5) + session-model fallback warning (S3) ─────────────
+  // Warn once per process; both degrade silently on missing ctx/ui.
+  const piVersion = getPiRuntimeVersion();
+  let versionWarned = false;
+  let sessionModelWarned = false;
+  pi.on("session_start", (_event: unknown, ctx: any) => {
+    if (!versionWarned && !isVersionInRange(piVersion)) {
+      versionWarned = true;
+      try {
+        ctx?.ui?.notify?.(
+          `blackhole: Pi runtime ${piVersion ?? "unknown"} is outside the supported range >=0.81.1 <1.0.0 — compaction internals may have changed.`,
+          "warning",
+        );
+      } catch {}
+    }
+    if (!sessionModelWarned) {
+      try {
+        omRuntime.ensureConfig(ctx?.cwd ?? process.cwd());
+      } catch {}
+      const cfg = omRuntime.config;
+      const usesSessionModel =
+        cfg.memory !== false &&
+        cfg.sessionFallback !== false &&
+        !cfg.observerModel &&
+        !cfg.reflectorModel &&
+        !cfg.dropperModel &&
+        !cfg.model;
+      if (usesSessionModel) {
+        sessionModelWarned = true;
+        try {
+          ctx?.ui?.notify?.(
+            "blackhole: observer/reflector/dropper will run on your session model (paid). Set observerModel/reflectorModel/dropperModel to cheaper models to cut cost.",
+            "info",
+          );
+        } catch {}
+      }
+    }
+  });
 
   // Observational memory: background consolidation pipeline
   registerConsolidationTrigger(pi, omRuntime); // agent_start + turn_end → observer/reflector/dropper
