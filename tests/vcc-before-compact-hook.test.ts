@@ -569,3 +569,68 @@ describe("registerBeforeCompactHook: reason/willRetry plumbing (Phase 0)", () =>
     expect(omRuntime.compactWasPiVcc).toBe(true);
   });
 });
+
+describe("registerBeforeCompactHook: overflow force-compact (Phase 1)", () => {
+  beforeEach(() => {
+    if (existsSync(DEBUG_PATH)) unlinkSync(DEBUG_PATH);
+  });
+  afterEach(() => {
+    if (existsSync(CONFIG_PATH)) unlinkSync(CONFIG_PATH);
+    if (existsSync(DEBUG_PATH)) unlinkSync(DEBUG_PATH);
+  });
+
+  test("overflow with too few live messages compacts all instead of cancelling", () => {
+    const { pi, invoke, omRuntime } = createMockPi();
+    omRuntime.config.overrideDefaultCompaction = false;
+    registerBeforeCompactHook(pi, omRuntime);
+
+    const entries = [msg("m1", "user"), msg("m2", "assistant")];
+    const result = invoke(
+      makeEvent(entries, PI_VCC_COMPACT_INSTRUCTION, "overflow", true),
+    );
+    expect(result).toBeDefined();
+    expect(result!.compaction).toBeDefined();
+    expect(omRuntime.compactionStats!.compactAll).toBe(true);
+    expect(omRuntime.compactionStats!.keptUserTurns).toBe(0);
+  });
+
+  test("manual reason with too few live messages still cancels (non-overflow)", () => {
+    const { pi, invoke, notifyCalls, omRuntime } = createMockPi();
+    omRuntime.config.overrideDefaultCompaction = false;
+    registerBeforeCompactHook(pi, omRuntime);
+
+    const entries = [msg("m1", "user"), msg("m2", "assistant")];
+    const result = invoke(
+      makeEvent(entries, PI_VCC_COMPACT_INSTRUCTION, "manual", false),
+    );
+    expect(result).toEqual({ cancel: true });
+    expect(notifyCalls).toHaveLength(1);
+    expect(notifyCalls[0].level).toBe("warning");
+  });
+
+  test("compaction:off + overflow falls through to blackhole pipeline (Q1)", () => {
+    const { pi, invoke, omRuntime } = createMockPi();
+    omRuntime.config.compaction = "off";
+    registerBeforeCompactHook(pi, omRuntime);
+
+    const entries = [msg("m1", "user"), msg("m2", "assistant")];
+    const result = invoke(makeEvent(entries, undefined, "overflow", true));
+    expect(result).toBeDefined();
+    expect(omRuntime.compactionStats!.compactAll).toBe(true);
+  });
+
+  test("compaction:off + threshold still returns early (Q1)", () => {
+    const { pi, invoke, omRuntime } = createMockPi();
+    omRuntime.config.compaction = "off";
+    registerBeforeCompactHook(pi, omRuntime);
+
+    const entries = [
+      msg("m1", "user"),
+      msg("m2", "assistant"),
+      msg("m3", "user"),
+      msg("m4", "assistant"),
+    ];
+    const result = invoke(makeEvent(entries, undefined, "threshold", false));
+    expect(result).toBeUndefined();
+  });
+});

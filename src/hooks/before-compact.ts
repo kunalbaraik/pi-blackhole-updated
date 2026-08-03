@@ -127,6 +127,9 @@ export function buildOwnCut(
   piFirstKeptEntryId?: string,
   /** "pi-default" = use Pi's cut, "minimal" = keep only last user message (current). */
   tailBehavior?: "pi-default" | "minimal",
+  /** Overflow recovery (reason==="overflow"): never cancel — force compact-all
+   * when the cut logic would otherwise bail. Empty branches still cancel. */
+  opts?: { forceCompactAll?: boolean },
 ): OwnCutResult {
   // Find the last compaction entry and its firstKeptEntryId
   let lastCompactionIdx = -1;
@@ -169,6 +172,20 @@ export function buildOwnCut(
     }
   }
 
+  // Overflow-force helper: compact everything via the "" sentinel (same path as
+  // single-user-prompt compact-all below). Only applies to too-few-live-messages
+  // cancels; an EMPTY branch still cancels (nothing to compact).
+  const compactAllResult = (): OwnCutResult => ({
+    ok: true,
+    messages: liveMessages.map((e) => e.message),
+    firstKeptEntryId: "",
+    compactAll: true,
+  });
+  const cancelTooFew = (): OwnCutResult =>
+    opts?.forceCompactAll
+      ? compactAllResult()
+      : { ok: false, reason: "too_few_live_messages" };
+
   // ── Pi's cut path: use Pi's firstKeptEntryId instead of last-user cut ──
   if (tailBehavior === "pi-default" && piFirstKeptEntryId) {
     const cutInBranch = branchEntries.findIndex(
@@ -200,7 +217,7 @@ export function buildOwnCut(
         }
         if (lastUserIdx > 0) {
           // Multiple user messages — minimal would aggressively cut, violating Pi
-          return { ok: false, reason: "too_few_live_messages" };
+          return cancelTooFew();
         }
         // Single user message — fall through to minimal path (will compact-all)
       }
@@ -236,7 +253,7 @@ export function buildOwnCut(
               lastUserIdx--;
             }
             if (lastUserIdx > 0) {
-              return { ok: false, reason: "too_few_live_messages" };
+              return cancelTooFew();
             }
             // Single user message — fall through to minimal (will compact-all)
           }
@@ -252,8 +269,7 @@ export function buildOwnCut(
 
   if (liveMessages.length === 0)
     return { ok: false, reason: "no_live_messages" };
-  if (liveMessages.length <= 2)
-    return { ok: false, reason: "too_few_live_messages" };
+  if (liveMessages.length <= 2) return cancelTooFew();
 
   // Summarize all messages, keep only the last user message as context
   let cutIdx = liveMessages.length - 1;
@@ -329,7 +345,11 @@ export const registerBeforeCompactHook = (
 
     // NEW: Unified compaction guards
     // compaction "off": blackhole skips auto-triggered, but /blackhole still uses blackhole pipeline
-    if (omRuntime.config.compaction === "off" && !isPiVcc) {
+    if (
+      omRuntime.config.compaction === "off" &&
+      !isPiVcc &&
+      reason !== "overflow"
+    ) {
       trace("before_compact.return_early", { reason: "compaction_off" });
       return;
     }
@@ -382,12 +402,14 @@ export const registerBeforeCompactHook = (
       configTailBehavior: omRuntime.config.tailBehavior,
       isPiVcc,
       piFirstKeptEntryId: preparation.firstKeptEntryId,
+      forceCompactAll: reason === "overflow",
     });
 
     const ownCut = buildOwnCut(
       branchEntries as any[],
       preparation.firstKeptEntryId,
       effectiveTailBehavior,
+      { forceCompactAll: reason === "overflow" },
     );
     if (!ownCut.ok) {
       const lastComp = [...branchEntries]

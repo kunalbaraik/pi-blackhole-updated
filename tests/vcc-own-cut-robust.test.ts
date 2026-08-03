@@ -402,3 +402,67 @@ describe("buildOwnCut", () => {
     });
   });
 });
+
+describe("buildOwnCut forceCompactAll (overflow recovery, Phase 1)", () => {
+  it("force-compacts-all when too few live messages (<= 2)", () => {
+    const entries = [msg("1", "user"), msg("2", "assistant")];
+    const res = buildOwnCut(entries, undefined, "minimal", {
+      forceCompactAll: true,
+    });
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.compactAll).toBe(true);
+      expect(res.firstKeptEntryId).toBe(""); // sentinel
+      expect(res.messages).toHaveLength(2);
+    }
+  });
+
+  it("still cancels on an empty branch even when forced", () => {
+    const res = buildOwnCut([], undefined, "minimal", {
+      forceCompactAll: true,
+    });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.reason).toBe("no_live_messages");
+  });
+
+  it("does not change the normal cut path when forceCompactAll is set", () => {
+    const entries = [
+      msg("1", "user"),
+      msg("2", "assistant"),
+      msg("3", "user"),
+      msg("4", "assistant"),
+    ];
+    const forced = buildOwnCut(entries, undefined, "minimal", {
+      forceCompactAll: true,
+    });
+    const normal = buildOwnCut(entries, undefined, "minimal");
+    expect(forced).toEqual(normal);
+  });
+
+  it("force-compacts-all when pi-default cut would cancel (multiple user messages)", () => {
+    const entries = [msg("1", "user"), msg("2", "user"), msg("3", "user")];
+    const res = buildOwnCut(entries, "1", "pi-default", {
+      forceCompactAll: true,
+    });
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.compactAll).toBe(true);
+      expect(res.firstKeptEntryId).toBe("");
+    }
+  });
+
+  it("leaves the natural compact-all path unchanged", () => {
+    // Single user + long assistant chain already compacts-all via cutIdx<=0.
+    const entries = [
+      msg("1", "user"),
+      msg("2", "assistant"),
+      msg("3", "assistant"),
+    ];
+    const forced = buildOwnCut(entries, undefined, "minimal", {
+      forceCompactAll: true,
+    });
+    const natural = buildOwnCut(entries, undefined, "minimal");
+    expect(forced).toEqual(natural);
+    if (forced.ok) expect(forced.compactAll).toBe(true);
+  });
+});
