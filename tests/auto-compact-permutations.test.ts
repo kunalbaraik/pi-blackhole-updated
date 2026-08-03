@@ -163,7 +163,12 @@ function captureFullSystem(config: PermutationConfig) {
         ctx,
       );
     },
-    fireBeforeCompact: (branch: any[], customInstructions?: string) => {
+    fireBeforeCompact: (
+      branch: any[],
+      customInstructions?: string,
+      reason: "manual" | "threshold" | "overflow" = "manual",
+      willRetry = false,
+    ) => {
       beforeCompactResult = beforeCompactHandler!(
         {
           type: "session_before_compact",
@@ -174,6 +179,8 @@ function captureFullSystem(config: PermutationConfig) {
             fileOps: { read: [], written: [], edited: [] },
             tokensBefore: 1000,
           },
+          reason,
+          willRetry,
           signal: new AbortController().signal,
         },
         ctx,
@@ -412,6 +419,49 @@ describe("Auto-compact trigger: before-compact hook integration", () => {
       }
     });
   }
+});
+
+describe("before-compact hook: reason-axis baseline (Phase 0)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const threeUserBranch = () => [
+    { id: "m1", type: "message", message: { role: "user", content: "first" } },
+    { id: "m2", type: "message", message: { role: "assistant", content: "a" } },
+    { id: "m3", type: "message", message: { role: "user", content: "second" } },
+    { id: "m4", type: "message", message: { role: "assistant", content: "a" } },
+    { id: "m5", type: "message", message: { role: "user", content: "third" } },
+    { id: "m6", type: "message", message: { role: "assistant", content: "a" } },
+  ];
+
+  it("all three reasons produce the same deterministic result (Phase 0 baseline)", async () => {
+    // Baseline precondition: reason/willRetry are plumbed (Phase 0) but do not
+    // change behavior yet. Phase 1 will make reason==="overflow" force compact-all;
+    // this test pins the pre-change contract.
+    const system = captureFullSystem({
+      noAutoCompact: false,
+      passive: false,
+      memory: true,
+      overrideDefaultCompaction: true,
+    });
+
+    system.fireBeforeCompact(threeUserBranch(), undefined, "manual", false);
+    const manualResult = system.beforeCompactResult;
+
+    system.fireBeforeCompact(threeUserBranch(), undefined, "threshold", false);
+    const thresholdResult = system.beforeCompactResult;
+
+    system.fireBeforeCompact(threeUserBranch(), undefined, "overflow", true);
+    const overflowResult = system.beforeCompactResult;
+
+    expect(manualResult).toBeDefined();
+    expect(thresholdResult).toEqual(manualResult);
+    expect(overflowResult).toEqual(manualResult);
+  });
 });
 
 describe("Auto-compact trigger: deferral and re-check paths", () => {

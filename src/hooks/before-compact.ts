@@ -297,7 +297,13 @@ export const registerBeforeCompactHook = (
   omRuntime: Runtime,
 ) => {
   pi.on("session_before_compact", (event, ctx) => {
-    const { preparation, branchEntries, customInstructions } = event;
+    const {
+      preparation,
+      branchEntries,
+      customInstructions,
+      reason,
+      willRetry,
+    } = event;
     omRuntime.ensureConfig(ctx.cwd ?? process.cwd(), (msg) =>
       ctx.ui?.notify?.(msg, "warning"),
     );
@@ -306,6 +312,8 @@ export const registerBeforeCompactHook = (
 
     trace("before_compact.enter", {
       customInstructions,
+      reason,
+      willRetry,
       isPiVcc: customInstructions === PI_VCC_COMPACT_INSTRUCTION,
       overrideDefaultCompaction: omRuntime.config.overrideDefaultCompaction,
       manualMode:

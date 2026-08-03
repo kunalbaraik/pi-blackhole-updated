@@ -75,7 +75,12 @@ function createMockPi(initialConfig?: Record<string, unknown>) {
   };
 }
 
-function makeEvent(branchEntries: any[], customInstructions?: string) {
+function makeEvent(
+  branchEntries: any[],
+  customInstructions?: string,
+  reason: "manual" | "threshold" | "overflow" = "manual",
+  willRetry = false,
+) {
   return {
     type: "session_before_compact",
     customInstructions,
@@ -85,6 +90,8 @@ function makeEvent(branchEntries: any[], customInstructions?: string) {
       fileOps: { read: [], written: [], edited: [] },
       tokensBefore: 1000,
     },
+    reason,
+    willRetry,
     signal: new AbortController().signal,
   };
 }
@@ -487,5 +494,78 @@ describe("registerBeforeCompactHook: CompactionStats population", () => {
     // compactAll: everything summarized, nothing kept
     expect(omRuntime.compactionStats!.compactAll).toBe(true);
     expect(omRuntime.compactionStats!.keptUserTurns).toBe(0);
+  });
+});
+
+describe("registerBeforeCompactHook: reason/willRetry plumbing (Phase 0)", () => {
+  beforeEach(() => {
+    if (existsSync(DEBUG_PATH)) unlinkSync(DEBUG_PATH);
+  });
+  afterEach(() => {
+    if (existsSync(CONFIG_PATH)) unlinkSync(CONFIG_PATH);
+    if (existsSync(DEBUG_PATH)) unlinkSync(DEBUG_PATH);
+  });
+
+  const threeUserBranch = () => [
+    msg("m1", "user", "first"),
+    msg("m2", "assistant"),
+    msg("m3", "user", "second"),
+    msg("m4", "assistant"),
+    msg("m5", "user", "third"),
+    msg("m6", "assistant"),
+  ];
+
+  test("makeEvent carries reason and willRetry through to the handler", () => {
+    const { pi, invoke, omRuntime } = createMockPi();
+    omRuntime.config.overrideDefaultCompaction = false;
+    registerBeforeCompactHook(pi, omRuntime);
+
+    // Baseline (Phase 0): reason/willRetry are plumbed but do not change behavior.
+    const overflowResult = invoke(
+      makeEvent(
+        threeUserBranch(),
+        PI_VCC_COMPACT_INSTRUCTION,
+        "overflow",
+        true,
+      ),
+    );
+    const thresholdResult = invoke(
+      makeEvent(
+        threeUserBranch(),
+        PI_VCC_COMPACT_INSTRUCTION,
+        "threshold",
+        false,
+      ),
+    );
+    const manualResult = invoke(
+      makeEvent(threeUserBranch(), PI_VCC_COMPACT_INSTRUCTION, "manual", false),
+    );
+
+    // All three reasons produce the deterministic blackhole summary path.
+    expect(overflowResult).toEqual(thresholdResult);
+    expect(thresholdResult).toEqual(manualResult);
+    expect(omRuntime.compactWasPiVcc).toBe(true);
+    expect(omRuntime.compactionStats!.summarized).toBe(4); // m1..m4 summarized, m5 kept
+  });
+
+  test("handler tolerates events without reason/willRetry (back-compat)", () => {
+    const { pi, invoke, omRuntime } = createMockPi();
+    omRuntime.config.overrideDefaultCompaction = false;
+    registerBeforeCompactHook(pi, omRuntime);
+
+    const legacyEvent = {
+      type: "session_before_compact",
+      customInstructions: PI_VCC_COMPACT_INSTRUCTION,
+      branchEntries: threeUserBranch(),
+      preparation: {
+        previousSummary: undefined,
+        fileOps: { read: [], written: [], edited: [] },
+        tokensBefore: 1000,
+      },
+      signal: new AbortController().signal,
+    };
+
+    expect(() => invoke(legacyEvent)).not.toThrow();
+    expect(omRuntime.compactWasPiVcc).toBe(true);
   });
 });
