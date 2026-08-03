@@ -14,6 +14,7 @@
  * concurrent pi sessions writing to a shared file.
  */
 import {
+  copyFileSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -22,7 +23,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
+import { join, basename } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -354,6 +355,31 @@ export function writePendingCursors(
   const state = readSessionState(sessionId);
   state.cursors = { ...cursors };
   writeSessionState(sessionId, state);
+}
+
+/** Copy a session's pending file to another session (F3 — fork continuity).
+ *  Returns true when a copy was made; false when the source has no pending
+ *  state or the copy failed. Never throws. */
+export function copyPendingState(
+  sourceSessionId: string,
+  targetSessionId: string,
+): boolean {
+  try {
+    const src = pendingPath(sourceSessionId);
+    if (!existsSync(src)) return false;
+    ensureDir();
+    copyFileSync(src, pendingPath(targetSessionId));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Derive a session id from its session file path (F3/F6):
+ *  ".../<id>.jsonl" → "<id>". Used with event previousSessionFile /
+ *  targetSessionFile fields. */
+export function sessionIdFromFile(file: string): string {
+  return basename(file).replace(/\.jsonl$/i, "");
 }
 
 /**

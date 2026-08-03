@@ -14,6 +14,7 @@ import { registerMemoryCommand } from "./src/commands/memory";
 import { registerVccRecallCommand } from "./src/commands/vcc-recall";
 import { registerConsolidationTrigger } from "./src/om/consolidation.js";
 import { registerCompactionTrigger } from "./src/om/compaction-trigger.js";
+import { registerSessionForkHandlers } from "./src/om/session-fork.js";
 import { registerRecallTool } from "./src/tools/recall";
 import { Runtime } from "./src/om/runtime.js";
 import { captureRegisteredProviderStreams } from "./src/om/provider-stream.js";
@@ -87,6 +88,7 @@ export default (pi: ExtensionAPI) => {
   // Observational memory: background consolidation pipeline
   registerConsolidationTrigger(pi, omRuntime); // agent_start + turn_end → observer/reflector/dropper
   registerCompactionTrigger(pi, omRuntime); // agent_end → auto-compaction
+  registerSessionForkHandlers(pi, omRuntime); // session_start(fork) → pending copy; switch → cursor reset
 
   // Pi-vcc: compaction + om injection
   registerBeforeCompactHook(pi, omRuntime); // session_before_compact → pi-vcc + om content
