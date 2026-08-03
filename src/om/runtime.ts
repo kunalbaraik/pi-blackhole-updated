@@ -23,7 +23,12 @@ import {
   expireCooldowns,
   modelKey,
 } from "./cooldown.js";
-import { readPendingCursors, writePendingCursors } from "./pending.js";
+import {
+  readPendingCursors,
+  writePendingCursors,
+  readBackoffState,
+  writeBackoffState,
+} from "./pending.js";
 import type { PendingOMState } from "./pending.js";
 
 export type ResolveResult =
@@ -392,8 +397,21 @@ export class Runtime {
     this.cursors[stage] = { entryId, state };
   }
 
-  /** Load cursors from the per‑session pending file into the in‑memory map. */
+  /** Load cursors + backoff from the per‑session pending file into memory. */
   loadCursorsFromPending(sessionId: string): void {
+    // F5: hydrate persisted backoff state first (only when in-memory is unset,
+    // so a fresher value from this session is never clobbered).
+    try {
+      const backoff = readBackoffState(sessionId);
+      if (backoff?.lastConsolidationErrorAt) {
+        this.lastConsolidationErrorAt = backoff.lastConsolidationErrorAt;
+      }
+      if (backoff?.midRunCompactionSuspended !== undefined) {
+        this.midRunCompactionSuspended = backoff.midRunCompactionSuspended;
+      }
+    } catch {
+      // Best‑effort.
+    }
     try {
       const stored = readPendingCursors(sessionId);
       if (!stored) return;
@@ -424,6 +442,7 @@ export class Runtime {
   saveCursorsToPending(sessionId: string): void {
     try {
       writePendingCursors(sessionId, this.cursors as PendingOMState["cursors"]);
+      this.persistBackoff(sessionId);
     } catch {
       // Best‑effort: graceful degradation on read‑only filesystems.
     }
@@ -433,13 +452,30 @@ export class Runtime {
    *  Uses a micro‑task to avoid blocking the pipeline. */
   scheduleCursorFlush(sessionId: string): void {
     const cursors = { ...this.cursors };
+    const backoff = {
+      lastConsolidationErrorAt: this.lastConsolidationErrorAt,
+      midRunCompactionSuspended: this.midRunCompactionSuspended,
+    };
     queueMicrotask(() => {
       try {
         writePendingCursors(sessionId, cursors as PendingOMState["cursors"]);
+        writeBackoffState(sessionId, backoff);
       } catch {
         // Best‑effort: graceful degradation.
       }
     });
+  }
+
+  /** Persist current backoff state to the per-session pending file (F5). */
+  persistBackoff(sessionId: string): void {
+    try {
+      writeBackoffState(sessionId, {
+        lastConsolidationErrorAt: this.lastConsolidationErrorAt,
+        midRunCompactionSuspended: this.midRunCompactionSuspended,
+      });
+    } catch {
+      // Best‑effort.
+    }
   }
 
   launchConsolidationTask(

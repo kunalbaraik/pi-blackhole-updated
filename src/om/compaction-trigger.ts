@@ -136,6 +136,7 @@ function handleTurnEnd(ctx: any, runtime: Runtime, pi: ExtensionAPI): void {
   if (tokens < runtime.config.compactAfterTokens) {
     // Pressure relieved (a compaction ran) — lift any failure suspension.
     runtime.midRunCompactionSuspended = false;
+    runtime.persistBackoff(ctx.sessionManager.getSessionId()); // F5
     return;
   }
   if (runtime.midRunCompactionSuspended) {
@@ -195,6 +196,7 @@ function handleTurnEnd(ctx: any, runtime: Runtime, pi: ExtensionAPI): void {
       // Don't retry at this pressure level — the next attempt would abort the
       // run again just to fail the same way. Cleared when pressure drops.
       runtime.midRunCompactionSuspended = true;
+      runtime.persistBackoff(ctx.sessionManager.getSessionId()); // F5
       dbg("compaction_trigger.turn_end.onError", {
         message: error?.message ?? String(error),
       });

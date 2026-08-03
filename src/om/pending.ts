@@ -74,6 +74,13 @@ export interface PendingOMState {
     reflector?: { entryId: string; state: string };
     dropper?: { entryId: string; state: string };
   };
+  /** Backoff/retry state — persisted across restarts (F5). */
+  backoff?: {
+    /** Epoch ms of the last failed consolidation run (any stage). */
+    lastConsolidationErrorAt?: number;
+    /** Mid-run compaction suspended after a failed/cancelled attempt. */
+    midRunCompactionSuspended?: boolean;
+  };
 }
 
 // ── Persistence ─────────────────────────────────────────────────────────────
@@ -103,6 +110,7 @@ function defaultState(): PendingOMState {
 }
 
 function isEmptyState(s: PendingOMState): boolean {
+  if (s.backoff) return false;
   const hasCursors =
     s.cursors &&
     (s.cursors.observer || s.cursors.reflector || s.cursors.dropper);
@@ -205,7 +213,9 @@ function isPendingOMState(value: unknown): value is PendingOMState {
     Array.isArray(v.droppedBatches);
   // Accept cursor-only states (no observations/reflections yet, but persisted)
   const hasCursors = !!(v.cursors && typeof v.cursors === "object");
-  return hasObs || hasRef || hasDrop || hasBatches || hasCursors;
+  // Accept backoff-only states (failed run recorded, nothing else yet)
+  const hasBackoff = !!(v.backoff && typeof v.backoff === "object");
+  return hasObs || hasRef || hasDrop || hasBatches || hasCursors || hasBackoff;
 }
 
 /**
@@ -354,6 +364,21 @@ export function writePendingCursors(
 ): void {
   const state = readSessionState(sessionId);
   state.cursors = { ...cursors };
+  writeSessionState(sessionId, state);
+}
+
+/** Read persisted backoff state for a session (F5). */
+export function readBackoffState(sessionId: string): PendingOMState["backoff"] {
+  return readSessionState(sessionId).backoff;
+}
+
+/** Write persisted backoff state for a session (F5). Preserves cursors. */
+export function writeBackoffState(
+  sessionId: string,
+  backoff: PendingOMState["backoff"],
+): void {
+  const state = readSessionState(sessionId);
+  state.backoff = backoff;
   writeSessionState(sessionId, state);
 }
 
