@@ -362,10 +362,21 @@ export const registerBeforeCompactHook = (
       return;
     }
 
-    // compaction "manual": /compact falls through to Pi, /blackhole still works
-    if (omRuntime.config.compaction === "manual" && !isPiVcc) {
-      trace("before_compact.return_early", { reason: "compaction_manual" });
-      return;
+    // compaction "manual": cancel ALL non-/blackhole compactions (auto-threshold
+    // AND native /compact) so no paid model calls run. Overflow still falls
+    // through to the blackhole pipeline so the session always recovers (Q1/Q2).
+    if (
+      omRuntime.config.compaction === "manual" &&
+      !isPiVcc &&
+      reason !== "overflow"
+    ) {
+      trace("before_compact.cancel", { reason: "compaction_manual" });
+      omRuntime.tryEmitInfo?.(
+        ctx?.hasUI ?? false,
+        ctx?.ui,
+        "blackhole: compaction is manual — auto-compaction cancelled. Run /blackhole to compact.",
+      );
+      return { cancel: true };
     }
 
     // LEGACY: old config key guards — only apply when new keys are absent (unmigrated config)

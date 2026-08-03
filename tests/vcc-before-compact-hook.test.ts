@@ -60,6 +60,11 @@ function createMockPi(initialConfig?: Record<string, unknown>) {
   };
   const omRuntime = {
     ensureConfig: vi.fn(() => {}),
+    tryEmitInfo: vi.fn((hasUI: boolean, ui: any, msg: string): boolean => {
+      if (!hasUI || !ui || typeof ui.notify !== "function") return false;
+      ui.notify(msg, "info");
+      return true;
+    }),
     config,
   };
   return {
@@ -296,8 +301,10 @@ describe("registerBeforeCompactHook: new config key guards", () => {
     expect(result.compaction).toBeDefined();
   });
 
-  test("T31: compaction:manual + auto → return (let Pi handle)", () => {
-    const { pi, invoke, omRuntime } = createMockPi({ compaction: "manual" });
+  test("T31: compaction:manual + auto → cancel (Q2: all non-/blackhole cancelled)", () => {
+    const { pi, invoke, notifyCalls, omRuntime } = createMockPi({
+      compaction: "manual",
+    });
     registerBeforeCompactHook(pi, omRuntime);
 
     const entries = [
@@ -308,7 +315,44 @@ describe("registerBeforeCompactHook: new config key guards", () => {
     ];
     const result = invoke(makeEvent(entries, undefined));
 
-    expect(result).toBeUndefined();
+    // Flipped: manual mode must NOT let Pi's paid compactor run.
+    expect(result).toEqual({ cancel: true });
+    expect(
+      notifyCalls.some((n) => n.level === "info" && n.msg.includes("manual")),
+    ).toBe(true);
+  });
+
+  test("T31b: compaction:manual + native /compact (reason manual) → cancel", () => {
+    const { pi, invoke, omRuntime } = createMockPi({ compaction: "manual" });
+    registerBeforeCompactHook(pi, omRuntime);
+
+    const entries = [
+      msg("m1", "user"),
+      msg("m2", "assistant"),
+      msg("m3", "user"),
+      msg("m4", "assistant"),
+    ];
+    const result = invoke(makeEvent(entries, undefined, "manual", false));
+
+    expect(result).toEqual({ cancel: true });
+  });
+
+  test("T31c: compaction:manual + overflow → falls through to blackhole pipeline", () => {
+    const { pi, invoke, omRuntime } = createMockPi({ compaction: "manual" });
+    registerBeforeCompactHook(pi, omRuntime);
+
+    const entries = [
+      msg("m1", "user"),
+      msg("m2", "assistant"),
+      msg("m3", "user"),
+      msg("m4", "assistant"),
+    ];
+    const result = invoke(makeEvent(entries, undefined, "overflow", true));
+
+    // Overflow always recovers via blackhole — never cancelled, never paid.
+    expect(result).toBeDefined();
+    expect(result.compaction).toBeDefined();
+    expect(omRuntime.compactWasPiVcc).toBe(false);
   });
 
   test("T32: compaction:auto + /blackhole → proceeds", () => {
